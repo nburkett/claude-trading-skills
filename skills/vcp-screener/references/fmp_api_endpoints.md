@@ -3,22 +3,32 @@
 ## Endpoints
 
 ### 1. S&P 500 Constituents
-- **URL:** `GET /api/v3/sp500_constituent`
+- **URL:** `GET /stable/sp500-constituent`
 - **Calls:** 1 (cached)
 - **Returns:** `[{symbol, name, sector, subSector}, ...]`
 - **Used in:** Phase 1 - Universe definition
+- **Fallback:** If the endpoint is restricted by the current FMP subscription,
+  the screener uses the first 100 symbols from
+  `scripts/sp500_universe_fallback.csv` so the workflow can continue with a
+  packaged large-cap S&P 500 sample. Use `--universe` to supply an explicit
+  symbol list when exact membership matters.
 
 ### 2. Batch Quote
-- **URL:** `GET /api/v3/quote/{symbols}` (comma-separated, max 5)
+- **URL:** `GET /stable/batch-quote?symbols={symbols}` (comma-separated, max 5)
 - **Calls:** ~101 (503 stocks / 5 per batch)
 - **Returns:** `[{symbol, price, yearHigh, yearLow, avgVolume, marketCap, ...}]`
 - **Used in:** Phase 1 - Pre-filter
+- **Fallback:** If batch quotes are restricted by the current FMP subscription,
+  the screener falls back to `GET /stable/quote?symbol={symbol}` one symbol at
+  a time.
 
 ### 3. Historical Prices
-- **URL:** `GET /api/v3/historical-price-full/{symbol}?timeseries=260`
+- **URL:** `GET /stable/historical-price-eod/full?symbol={symbol}&from={date}&to={date}`
 - **Calls:** 1 (SPY) + up to 100 (candidates)
 - **Returns:** `{symbol, historical: [{date, open, high, low, close, adjClose, volume}, ...]}`
 - **Used in:** Phase 2 - Trend Template, Phase 3 - VCP detection
+- **Legacy fallback:** `GET /api/v3/historical-price-full/{symbol}?timeseries=260`
+  remains as a fallback for legacy FMP users.
 
 ## API Budget Summary
 

@@ -16,7 +16,9 @@ Features:
 import os
 import sys
 import time
+import csv
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Optional
 
 try:
@@ -30,7 +32,10 @@ except ImportError:
 
 
 def _stable_quote_url(base, symbols_str, params):
-    """stable/quote?symbol=^GSPC"""
+    """stable/quote?symbol=^GSPC or stable/batch-quote?symbols=AAPL,MSFT"""
+    if "," in symbols_str:
+        params["symbols"] = symbols_str
+        return "https://financialmodelingprep.com/stable/batch-quote", params
     params["symbol"] = symbols_str
     return base, params
 
@@ -122,6 +127,7 @@ class FMPClient:
 
     BASE_URL = "https://financialmodelingprep.com/api/v3"
     RATE_LIMIT_DELAY = 0.3  # 300ms between requests
+    FALLBACK_SP500_PATH = Path(__file__).resolve().parent / "sp500_universe_fallback.csv"
 
     _ENDPOINT_FAILURE_THRESHOLD = 3  # disable endpoint after N consecutive failures
 
@@ -205,7 +211,12 @@ class FMPClient:
             is_last = i == len(endpoints) - 1
             data = self._rate_limited_get(url, final_params, quiet=not is_last)
             if not data:  # falsy (None, [], {}) — try next endpoint
-                self._record_endpoint_failure(base_url)
+                if not (
+                    endpoint_key == "quote"
+                    and is_single
+                    and base_url == "https://financialmodelingprep.com/stable/quote"
+                ):
+                    self._record_endpoint_failure(base_url)
                 continue
 
             # Normalize new stable EOD flat-list shape to v3-compatible dict.
@@ -279,11 +290,30 @@ class FMPClient:
         if cache_key in self.cache:
             return self.cache[cache_key]
 
-        url = f"{self.BASE_URL}/sp500_constituent"
+        url = "https://financialmodelingprep.com/stable/sp500-constituent"
         data = self._rate_limited_get(url)
         if data:
             self.cache[cache_key] = data
-        return data
+            return data
+
+        fallback = self._load_sp500_fallback()
+        if fallback:
+            print(
+                "WARNING: FMP S&P 500 constituent endpoint unavailable; "
+                "using packaged fallback universe.",
+                file=sys.stderr,
+            )
+            self.cache[cache_key] = fallback
+            return fallback
+        return None
+
+    def _load_sp500_fallback(self) -> list[dict]:
+        """Load packaged S&P 500 fallback universe for restricted FMP plans."""
+        try:
+            with self.FALLBACK_SP500_PATH.open(newline="", encoding="utf-8") as f:
+                return [row for row in csv.DictReader(f) if row.get("symbol")][:100]
+        except OSError:
+            return []
 
     def get_quote(self, symbols: str) -> Optional[list[dict]]:
         """Fetch real-time quote data for one or more symbols (comma-separated)"""
@@ -318,6 +348,12 @@ class FMPClient:
             if quotes:
                 for q in quotes:
                     results[q["symbol"]] = q
+            elif len(batch) > 1:
+                for symbol in batch:
+                    single_quote = self.get_quote(symbol)
+                    if single_quote:
+                        for q in single_quote:
+                            results[q["symbol"]] = q
         return results
 
     def get_batch_historical(self, symbols: list[str], days: int = 260) -> dict[str, list[dict]]:

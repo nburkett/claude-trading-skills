@@ -56,3 +56,7 @@ When making significant improvements to a skill:
   - `観察 -> 抽象化 -> 戦略化 -> パイプライン` の分業フロー
   - 進級ステート（Hint/Ticket/Concept/Draft/Candidate/Live）
   - Concept/Draft/Pipeline/Promotion のゲート基準
+- **`daily-morning-report-design.md`** - Daily/ad hoc idea report design
+  - Market permission -> sector rotation -> stock watchlist flow
+  - CAN SLIM/VCP integration points
+  - EMA pullback and relative-strength scanner gap analysis

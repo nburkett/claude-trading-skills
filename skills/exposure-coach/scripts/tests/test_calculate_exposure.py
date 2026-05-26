@@ -15,6 +15,7 @@ from calculate_exposure import (
     extract_ftd_score,
     extract_regime_name,
     extract_regime_score,
+    extract_sector_score,
     extract_top_risk_score,
     extract_uptrend_score,
     generate_markdown_report,
@@ -33,6 +34,15 @@ class TestExtractBreadthScore:
     def test_composite_score_fallback(self):
         data = {"composite_score": 60}
         assert extract_breadth_score(data) == 60
+
+    def test_current_market_breadth_nested_composite(self):
+        data = {
+            "composite": {
+                "composite_score": 32.4,
+                "zone": "Weakening",
+            }
+        }
+        assert extract_breadth_score(data) == 32
 
     def test_ad_ratio_calculation_high(self):
         data = {"ad_ratio": 2.0, "nh_nl_ratio": 4.0}
@@ -72,6 +82,15 @@ class TestExtractUptrendScore:
     def test_direct_score(self):
         data = {"uptrend_score": 80}
         assert extract_uptrend_score(data) == 80
+
+    def test_current_uptrend_nested_composite(self):
+        data = {
+            "composite": {
+                "composite_score": 15.9,
+                "zone": "Bear",
+            }
+        }
+        assert extract_uptrend_score(data) == 15
 
     def test_uptrend_pct_high(self):
         data = {"uptrend_pct": 60}
@@ -285,6 +304,19 @@ class TestRealUpstreamShapesAllCount:
         assert composite > 50
 
 
+class TestExtractSectorScore:
+    """Tests for sector score extraction."""
+
+    def test_current_sector_analyst_group_score(self):
+        data = {
+            "groups": {
+                "score": 59,
+                "regime": "balanced",
+            }
+        }
+        assert extract_sector_score(data) == 59
+
+
 class TestCalculateCompositeScore:
     """Tests for composite score calculation."""
 
@@ -394,6 +426,16 @@ class TestDetermineBias:
         bias = determine_bias("Transitional", 50, sector_data, None)
         assert bias == "GROWTH"
 
+    def test_sector_leadership_from_current_ranking(self):
+        sector_data = {
+            "ranking": [
+                {"rank": 1, "sector": "Energy", "ratio_pct": 60.2},
+                {"rank": 2, "sector": "Technology", "ratio_pct": 32.4},
+            ]
+        }
+        bias = determine_bias("Transitional", 50, sector_data, None)
+        assert bias == "VALUE"
+
     def test_sector_leadership_financials(self):
         sector_data = {"leadership": "Financials"}
         bias = determine_bias("Transitional", 50, sector_data, None)
@@ -418,6 +460,16 @@ class TestDetermineParticipation:
     def test_moderate_participation(self):
         part = determine_participation(55, 40, {"dispersion": 0.10})
         assert part == "MODERATE"
+
+    def test_current_sector_spread_counts_as_high_dispersion(self):
+        sector_data = {
+            "ranking": [
+                {"sector": "Energy", "ratio": 0.60},
+                {"sector": "Utilities", "ratio": 0.06},
+            ]
+        }
+        part = determine_participation(55, 52, sector_data)
+        assert part == "NARROW"
 
 
 class TestDetermineConfidence:

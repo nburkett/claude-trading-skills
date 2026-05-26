@@ -14,6 +14,7 @@ import argparse
 import glob
 import json
 import logging
+import os
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,17 @@ logger = logging.getLogger(__name__)
 
 DASHBOARD_DIR = Path(__file__).resolve().parent / "knowledge"
 RETENTION_DAYS = 3
+
+
+def _load_local_env() -> None:
+    """Load dashboard-local .env so subprocess skill scripts inherit API keys."""
+    if os.getenv("PYTHON_DOTENV_DISABLED", "").strip().lower() in {"1", "true", "yes"}:
+        return
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +433,8 @@ def cleanup_old_dashboards(retention_days: int = RETENTION_DAYS) -> None:
 
 
 def main() -> None:
+    _load_local_env()
+
     parser = argparse.ArgumentParser(description="Generate daily market dashboard")
     parser.add_argument(
         "--project-root",

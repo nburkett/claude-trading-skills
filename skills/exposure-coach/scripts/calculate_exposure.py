@@ -38,6 +38,70 @@ REGIME_SCORES = {
 }
 
 
+def _nested_get(data: dict, *keys: str):
+    """Return a nested value from dict data, or None if any level is absent."""
+    current = data
+    for key in keys:
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    return current
+
+
+def _score_int(value) -> Optional[int]:
+    """Coerce numeric report values to bounded integer scores."""
+    if value is None:
+        return None
+    try:
+        return max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _sector_leadership(sector_data: dict) -> Optional[str]:
+    """Extract leading sector from either flat or sector-analyst report shape."""
+    leadership = sector_data.get("leadership")
+    if leadership:
+        return str(leadership)
+
+    ranking = sector_data.get("ranking")
+    if isinstance(ranking, list) and ranking:
+        first = ranking[0]
+        if isinstance(first, dict) and first.get("sector"):
+            return str(first["sector"])
+
+    return None
+
+
+def _sector_dispersion(sector_data: dict) -> Optional[float]:
+    """Extract or infer sector dispersion from current sector ranking output."""
+    if "dispersion" in sector_data:
+        try:
+            return float(sector_data["dispersion"])
+        except (TypeError, ValueError):
+            return None
+
+    ranking = sector_data.get("ranking")
+    if not isinstance(ranking, list) or len(ranking) < 2:
+        return None
+
+    ratios = []
+    for row in ranking:
+        if not isinstance(row, dict):
+            continue
+        ratio = row.get("ratio")
+        if ratio is None and row.get("ratio_pct") is not None:
+            ratio = row["ratio_pct"] / 100
+        try:
+            ratios.append(float(ratio))
+        except (TypeError, ValueError):
+            continue
+
+    if len(ratios) < 2:
+        return None
+    return max(ratios) - min(ratios)
+
+
 def load_json_file(path: Optional[Path]) -> Optional[dict]:
     """Load a JSON file if it exists and is valid."""
     if path is None or not path.exists():
@@ -56,14 +120,14 @@ def extract_breadth_score(data: Optional[dict]) -> Optional[int]:
         return None
     # Support various field names from upstream skill
     if "breadth_score" in data:
-        return int(data["breadth_score"])
+        return _score_int(data["breadth_score"])
     if "composite_score" in data:
-        return int(data["composite_score"])
+        return _score_int(data["composite_score"])
     # market-breadth-analyzer nests its 0-100 health score under "composite"
     # (100 = healthy). High = bullish, so used directly (no inversion).
-    composite = data.get("composite")
-    if isinstance(composite, dict) and "composite_score" in composite:
-        return int(composite["composite_score"])
+    nested_composite = _nested_get(data, "composite", "composite_score")
+    if nested_composite is not None:
+        return _score_int(nested_composite)
     if "ad_ratio" in data and "nh_nl_ratio" in data:
         ad = data["ad_ratio"]
         nh_nl = data["nh_nl_ratio"]
@@ -100,14 +164,14 @@ def extract_uptrend_score(data: Optional[dict]) -> Optional[int]:
     if data is None:
         return None
     if "uptrend_score" in data:
-        return int(data["uptrend_score"])
+        return _score_int(data["uptrend_score"])
     # uptrend-analyzer nests its score under "composite"
-    composite = data.get("composite")
-    if isinstance(composite, dict):
-        if "composite_score" in composite:
-            return int(composite["composite_score"])
-        if "uptrend_pct" in composite:
-            return _uptrend_pct_to_score(composite["uptrend_pct"])
+    nested_composite = _nested_get(data, "composite", "composite_score")
+    if nested_composite is not None:
+        return _score_int(nested_composite)
+    nested_pct = _nested_get(data, "composite", "uptrend_pct")
+    if nested_pct is not None:
+        return _uptrend_pct_to_score(nested_pct)
     if "uptrend_pct" in data:
         return _uptrend_pct_to_score(data["uptrend_pct"])
     return None
@@ -226,7 +290,10 @@ def extract_sector_score(data: Optional[dict]) -> Optional[int]:
     if data is None:
         return None
     if "sector_score" in data:
-        return int(data["sector_score"])
+        return _score_int(data["sector_score"])
+    group_score = _nested_get(data, "groups", "score")
+    if group_score is not None:
+        return _score_int(group_score)
     if "dispersion" in data and "leadership" in data:
         disp = data["dispersion"]
         lead = data["leadership"].lower()
@@ -372,6 +439,16 @@ def determine_bias(
             return "VALUE"
         if lead in ["utilities", "staples", "healthcare"]:
             return "DEFENSIVE"
+    elif sector_data:
+        leadership = _sector_leadership(sector_data)
+        if leadership:
+            lead = leadership.lower()
+            if lead in ["technology", "consumer discretionary", "communications"]:
+                return "GROWTH"
+            if lead in ["financials", "financial", "energy", "materials", "industrials"]:
+                return "VALUE"
+            if lead in ["utilities", "staples", "consumer defensive", "healthcare"]:
+                return "DEFENSIVE"
 
     # Institutional flow
     if institutional_data and "sector_flows" in institutional_data:
@@ -397,8 +474,10 @@ def determine_participation(
 
     # Check sector dispersion if available
     low_dispersion = True
-    if sector_data and "dispersion" in sector_data:
-        low_dispersion = sector_data["dispersion"] < 0.15
+    if sector_data:
+        dispersion = _sector_dispersion(sector_data)
+        if dispersion is not None:
+            low_dispersion = dispersion < 0.15
 
     if uptrend_broad and breadth_broad and low_dispersion:
         return "BROAD"
